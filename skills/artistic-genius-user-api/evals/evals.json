@@ -1,0 +1,95 @@
+{
+  "skill_name": "artistic-genius-user-api",
+  "evals": [
+    {
+      "id": "key-balance",
+      "prompt": "我的 AG key 还剩多少钱？key 在 AG_API_KEY 里",
+      "trigger_expected": true,
+      "expected_output": "用 sk- 令牌 GET /api/usage/token/，把 total_available 与 total_used 换算成人民币（quota/500000×7）回答。",
+      "files": [],
+      "assertions": [
+        {
+          "type": "contains",
+          "value": "/api/usage/token/"
+        },
+        {
+          "type": "contains",
+          "value": "500000"
+        }
+      ]
+    },
+    {
+      "id": "month-spend-by-model",
+      "prompt": "帮我看一下 Artistic Genius 账号这个月每个模型花了多少，访问令牌在 AG_ACCESS_TOKEN",
+      "trigger_expected": true,
+      "expected_output": "用系统访问令牌调用 /api/data/self（跨度≤30天，超出分段），按 model_name 汇总 quota 并换算成人民币；必要时用 /api/log/self/stat 校对总额。",
+      "files": [],
+      "assertions": [
+        {
+          "type": "contains",
+          "value": "/api/data/self"
+        },
+        {
+          "type": "contains",
+          "value": "AG_ACCESS_TOKEN"
+        }
+      ]
+    },
+    {
+      "id": "task-cost",
+      "prompt": "帮我统计一下刚才这个任务在 AG 上用了多少 token、花了多少钱，令牌名叫 my-agent",
+      "trigger_expected": true,
+      "expected_output": "按 recipes 第 1 节：用 START/END 时间窗 + token_name=my-agent + type=2 拉 /api/log/self（翻页取完），汇总请求次数、输入/输出 tokens 与 ¥ 金额。",
+      "files": [],
+      "assertions": [
+        {
+          "type": "contains",
+          "value": "token_name"
+        },
+        {
+          "type": "contains",
+          "value": "¥"
+        }
+      ]
+    },
+    {
+      "id": "no-credential",
+      "prompt": "我想查 AG 的余额，但我不知道要用什么 key",
+      "trigger_expected": true,
+      "expected_output": "说明两种凭证的获取位置（令牌页新建 sk-；个人设置生成访问令牌）及区别，不猜测、不自行生成访问令牌。",
+      "files": [],
+      "assertions": [
+        {
+          "type": "contains",
+          "value": "个人设置"
+        }
+      ]
+    },
+    {
+      "id": "admin-near-miss",
+      "prompt": "把 AG 生产上 gpt-6-luna 的倍率改成 0.2",
+      "trigger_expected": false,
+      "expected_output": "不触发：这是站点管理员改倍率，属于管理后台技能。",
+      "files": [],
+      "assertions": [
+        {
+          "type": "not_contains",
+          "value": "/api/usage/token"
+        }
+      ]
+    },
+    {
+      "id": "other-relay-near-miss",
+      "prompt": "查一下我 OpenAI 官方账号的本月账单",
+      "trigger_expected": false,
+      "expected_output": "不触发：不是 Artistic Genius。",
+      "files": [],
+      "assertions": [
+        {
+          "type": "not_contains",
+          "value": "artistic-genius.vip"
+        }
+      ]
+    }
+  ]
+}

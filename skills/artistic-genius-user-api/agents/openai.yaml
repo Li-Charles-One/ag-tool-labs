@@ -1,0 +1,4 @@
+interface:
+  display_name: "Artistic Genius 用户 API"
+  short_description: "用自己的令牌调用 Artistic Genius 并查询余额与费用"
+  default_prompt: "Use $artistic-genius-user-api to check my Artistic Genius balance and spending."

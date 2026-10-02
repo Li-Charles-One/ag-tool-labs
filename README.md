@@ -11,6 +11,8 @@
 | 名称 | 用途 | 需要的凭证 | 下载 |
 |---|---|---|---|
 | [artistic-genius-user-api](skills/artistic-genius-user-api/) | 费用与余额查询：让你的 Agent 用你自己的令牌查余额、已用额度和调用记录，统计某个任务花了多少，金额一律换算成人民币。 | `sk-` 令牌（环境变量 `AG_API_KEY`）；查整个账号的花费还需要系统访问令牌（`AG_ACCESS_TOKEN`） | [v1.0.1](https://github.com/Li-Charles-One/ag-tool-labs/releases/download/artistic-genius-user-api-v1.0.1/artistic-genius-user-api-v1.0.1.zip) |
+| [ag-omni](skills/ag-omni/) | 视听分析：让你的 Agent 看图、读 PDF、听音频、看视频，做图片理解与 OCR、UI 截图点评、音视频总结与转写，支持 YouTube 链接。 | Gemini 分组的 `sk-` 令牌（环境变量 `AG_GEMINI_KEY`）；想用 MiMo 时另需 mimo 分组的令牌（`AG_MIMO_KEY`）。本机需要 Python 3.9+ 与 ffmpeg | [v1.0.0](https://github.com/Li-Charles-One/ag-tool-labs/releases/download/ag-omni-v1.0.0/ag-omni-v1.0.0.zip) |
+| [ag-x-search](skills/ag-x-search/) | X 实时搜索：让你的 Agent 通过 Grok 搜 X（Twitter），按关键词找帖子、看某个账号的最近动态、出话题热度与情绪简报，结果带原帖链接。 | Grok 分组的 `sk-` 令牌（环境变量 `AG_GROK_KEY`）。本机需要 Python 3.9+ | [v1.0.0](https://github.com/Li-Charles-One/ag-tool-labs/releases/download/ag-x-search-v1.0.0/ag-x-search-v1.0.0.zip) |
 
 ### 通用
 
@@ -42,9 +44,9 @@
 
 也可以手动安装：下载上表的 zip，解压后把整个 skill 文件夹放进你的 Agent 的 skill 目录。
 
-## 凭证（artistic-genius-user-api）
+## 凭证（Artistic Genius 专属 skill）
 
-- `sk-` 令牌：登录 <https://artistic-genius.vip> → 控制台 → 令牌 → 新建令牌。
-- 系统访问令牌：控制台 → 个人设置 → 访问令牌 → 生成。它等于账号全部权限，请按密码保管。
+- `sk-` 令牌：登录 <https://artistic-genius.vip> → 控制台 → 令牌 → 新建令牌。建令牌时要选分组，一把令牌只能调用所属分组的模型：`ag-omni` 用 Gemini 分组（或 mimo 分组）的令牌，`ag-x-search` 用 Grok 分组的令牌。
+- 系统访问令牌（仅 `artistic-genius-user-api` 查整个账号时需要）：控制台 → 个人设置 → 访问令牌 → 生成。它等于账号全部权限，请按密码保管。
 
 凭证只放在环境变量里，不要贴进聊天，也不要写进会提交到 Git 的文件。

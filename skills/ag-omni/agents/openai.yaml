@@ -1,0 +1,4 @@
+interface:
+  display_name: "AG Omni"
+  short_description: "Analyze images, video/audio, and OCR"
+  default_prompt: "Use $ag-omni to analyze this image, video, or audio, or to OCR text from a screenshot or PDF."

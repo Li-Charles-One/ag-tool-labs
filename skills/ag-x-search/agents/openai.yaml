@@ -1,0 +1,7 @@
+interface:
+  display_name: "AG X Search"
+  short_description: "Search X through Artistic Genius Grok"
+  default_prompt: "Use $ag-x-search to search X for $input"
+
+policy:
+  allow_implicit_invocation: true

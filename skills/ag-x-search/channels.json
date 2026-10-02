@@ -5,7 +5,7 @@
       "priority": 1,
       "enabled": true,
       "base": "https://artistic-genius.vip/v1",
-      "models": ["grok-4.7", "grok-4.6"],
+      "models": ["grok-4.7"],
       "key_env": ["AG_GROK_KEY"]
     }
   ]

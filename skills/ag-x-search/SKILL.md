@@ -2,7 +2,7 @@
 name: ag-x-search
 description: "通过 Artistic Genius 的 Grok 模型做 X/Twitter 实时搜索与情报分析：关键词检索、特定账号动态跟踪、全网讨论热度与舆情简报。需要 Artistic Genius 的 Grok 分组令牌。不要用于发帖点赞等社交互动，或与 X 无关的通用网页搜索。"
 metadata:
-  version: "1.0.0"
+  version: "1.0.1"
 ---
 
 # AG X Search
@@ -18,7 +18,7 @@ Do not use for: posting, liking, following, DMs, or account management; web rese
 ## Setup
 
 - Key: an Artistic Genius `sk-` token **created in the Grok group** (console → 令牌 → 新建令牌, pick the Grok group). A token from another group gets `No available channel`. Put it in the environment variable `AG_GROK_KEY`, or in a skill-local `.env` copied from `.env.example`. Environment variables override `.env`. Never print the key.
-- `channels.json` — channel registry: `id`, `priority`, `enabled`, `base`, `models` (tried in order), `key_env`. Default: `ag` at `https://artistic-genius.vip/v1` with `grok-4.7` → `grok-4.6`.
+- `channels.json` — channel registry: `id`, `priority`, `enabled`, `base`, `models` (tried in order), `key_env`. Default: `ag` at `https://artistic-genius.vip/v1` with `grok-4.7`.
 - Check readiness: `python scripts/x_search.py --list-channels`
 
 ## Modes

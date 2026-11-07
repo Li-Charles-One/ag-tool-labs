@@ -78,7 +78,7 @@ curl -s "$B/api/log/self/stat?type=2&start_timestamp=$MONTH&end_timestamp=$(date
 
 ## 5. 本月哪个模型最花钱
 
-`GET /api/data/self`（跨度 ≤ 30 天，超出就分段），按 `model_name` 汇总 `quota` 和 `token_used`，按金额从高到低列出，每行写：模型、请求次数、tokens、¥。
+`GET /api/data/self`（跨度超出站点上限时按报错天数分段），按 `model_name` 汇总 `quota` 和 `token_used`，按金额从高到低列出，每行写：模型、请求次数、tokens、¥。
 
 ## 6. 余额还能用多久
 

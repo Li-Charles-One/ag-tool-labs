@@ -22,7 +22,7 @@
       "id": "month-spend-by-model",
       "prompt": "帮我看一下 Artistic Genius 账号这个月每个模型花了多少，访问令牌在 AG_ACCESS_TOKEN",
       "trigger_expected": true,
-      "expected_output": "用系统访问令牌调用 /api/data/self（跨度≤30天，超出分段），按 model_name 汇总 quota 并换算成人民币；必要时用 /api/log/self/stat 校对总额。",
+      "expected_output": "用访问令牌调用 /api/data/self（跨度超出站点上限时按报错天数分段），按 model_name 汇总 quota 并换算成人民币；必要时用 /api/log/self/stat 校对总额。",
       "files": [],
       "assertions": [
         {
@@ -56,12 +56,12 @@
       "id": "no-credential",
       "prompt": "我想查 AG 的余额，但我不知道要用什么 key",
       "trigger_expected": true,
-      "expected_output": "说明两种凭证的获取位置（令牌页新建 sk-；个人设置生成访问令牌）及区别，不猜测、不自行生成访问令牌。",
+      "expected_output": "说明两种凭证的获取位置（API 密钥页新建 sk-；安全 → 访问令牌创建 nap_ 令牌并勾选 profile:read 与 usage:read）及区别，不猜测、不自行创建访问令牌。",
       "files": [],
       "assertions": [
         {
           "type": "contains",
-          "value": "个人设置"
+          "value": "安全"
         }
       ]
     },

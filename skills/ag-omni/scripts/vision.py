@@ -4,7 +4,6 @@ AG Omni (视听) — Image / video / audio / PDF analysis through Artistic Geniu
 
 Built-in providers:
   gemini  (default) — Gemini native generateContent via Artistic Genius
-  mimo              — Xiaomi MiMo OpenAI-compatible chat.completions via Artistic Genius
 
 Custom providers: set {NAME}_BASE_URL / {NAME}_API_KEY / {NAME}_MODEL
   and optional {NAME}_API_STYLE=gemini|openai
@@ -12,7 +11,7 @@ Custom providers: set {NAME}_BASE_URL / {NAME}_API_KEY / {NAME}_MODEL
 Usage:
     python3 vision.py --list-providers
     python3 vision.py --check
-    python3 vision.py <file_or_url> <mode> [--provider gemini|mimo|custom]
+    python3 vision.py <file_or_url> <mode> [--provider gemini|custom]
     python3 vision.py https://www.youtube.com/watch?v=... video-summary
     python3 vision.py report.pdf ocr
     python3 vision.py long.mp4 video-summary   # auto segment when long
@@ -44,7 +43,7 @@ import urllib.request
 from functools import lru_cache
 from pathlib import Path
 
-# Local base64: leave headroom under MiMo ~50MB encoded limit (×1.33).
+# Local base64: leave headroom under a ~50MB encoded request limit (×1.33).
 MAX_RAW_BYTES = int(os.environ.get("VISION_MAX_RAW_MB", "35")) * 1024 * 1024
 # Re-encode local media when larger than this (analysis proxy, not master).
 PROXY_TRIGGER_BYTES = int(os.environ.get("VISION_PROXY_TRIGGER_MB", "20")) * 1024 * 1024
@@ -390,7 +389,7 @@ def check_system() -> dict:
     return {
         "ffmpeg": ff or "MISSING",
         "ffprobe": fp or "MISSING",
-        "pdftoppm": shutil.which("pdftoppm") or "MISSING (only needed for MiMo / page-mode PDF)",
+        "pdftoppm": shutil.which("pdftoppm") or "MISSING (only needed for OpenAI-style providers / page-mode PDF)",
         "active_provider": _active_provider(),
         "providers": providers,
         "long_video_sec": LONG_VIDEO_SEC,
@@ -734,13 +733,6 @@ BUILTIN_PROVIDERS = {
         "key_envs": ("AG_GEMINI_KEY", "VISION_API_KEY"),
         "note": "Artistic Genius, Gemini group (native generateContent)",
     },
-    "mimo": {
-        "base_url": "https://artistic-genius.vip/v1",
-        "model": "mimo-v2.6-flash",
-        "api_style": "openai",
-        "key_envs": ("AG_MIMO_KEY", "VISION_API_KEY"),
-        "note": "Artistic Genius, mimo group (OpenAI-compatible)",
-    },
 }
 DEFAULT_PROVIDER = "gemini"
 
@@ -928,11 +920,7 @@ def _openai_part(path_or_url: str, kind: str, model: str) -> dict:
     if kind == "audio":
         return {"type": "input_audio", "input_audio": {"data": url}}
     if kind == "video":
-        part = {"type": "video_url", "video_url": {"url": url}}
-        if model.startswith("mimo"):
-            part["fps"] = float(os.environ.get("VISION_VIDEO_FPS", "2"))
-            part["media_resolution"] = os.environ.get("VISION_VIDEO_RESOLUTION", "default")
-        return part
+        return {"type": "video_url", "video_url": {"url": url}}
     return {"type": "image_url", "image_url": {"url": url}}
 
 
@@ -1036,9 +1024,6 @@ def call_model(conf: dict, media: list, prompt: str, timeout: float, show_think:
         "max_completion_tokens": max_out,
         "max_tokens": max_out,
     }
-    if model.startswith("mimo"):
-        # MiMo thinking is mandatory and cannot be disabled.
-        payload["thinking"] = {"type": "enabled"}
     data = _post_json(
         f"{conf['base_url']}/chat/completions",
         {"Authorization": f"Bearer {key}", "api-key": key},
@@ -1223,7 +1208,7 @@ def analyze_media(
 
     Gemini style: native /v1beta/models/{model}:generateContent
       - local → inline_data base64; YouTube / URL → fileData.fileUri
-    OpenAI style (MiMo): /chat/completions
+    OpenAI style (custom providers): /chat/completions
     """
     conf = _conf or provider_conf(provider, model=model, base_url=base_url, api_key=api_key)
     if not conf["api_key"]:
@@ -1287,7 +1272,7 @@ def analyze_media(
         try:
             # --force-proxy is video-oriented; audio/image still size-trigger.
             # Gemini-style local video prefers H.264 for broader decoder support.
-            # OpenAI-style (MiMo) rejects AIFF, so it always gets an AAC proxy.
+            # OpenAI-style endpoints reject AIFF, so it always gets an AAC proxy.
             upload_path = ensure_media_under_limit(
                 media_input,
                 kind=kind,
@@ -1387,7 +1372,7 @@ def main():
     parser = argparse.ArgumentParser(
         description=(
             "AG Omni (视听) — multimodal analysis. "
-            "Built-in providers: gemini (default), mimo. "
+            "Built-in provider: gemini (default). "
             "Custom: set {NAME}_BASE_URL / _API_KEY / _MODEL."
         )
     )
@@ -1399,7 +1384,7 @@ def main():
         "--output", "-o", choices=["text", "json"], default="text", help="Output format (default: text)",
     )
     parser.add_argument(
-        "--provider", "-p", default=None, help="Provider id: gemini|mimo or custom name (default: gemini)",
+        "--provider", "-p", default=None, help="Provider id: gemini or custom name (default: gemini)",
     )
     parser.add_argument("--model", "-m", default=None, help="Model override")
     parser.add_argument("--base-url", default=None, help="API base URL override")

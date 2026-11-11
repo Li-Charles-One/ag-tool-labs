@@ -9,7 +9,7 @@ metadata:
 
 This skill exists to **analyze images**, **analyze video/audio**, and **OCR**. Nothing else.
 
-Everything goes through [Artistic Genius](https://artistic-genius.vip). Default provider `gemini`: `gemini-3.8-flash-high` via native Gemini `generateContent`. Any other multimodal endpoint can be configured as a custom provider.
+Everything goes through [Artistic Genius](https://artistic-genius.vip). Default provider `gemini`: `gemini-3.8-flash` via native Gemini `generateContent`. Any other multimodal endpoint can be configured as a custom provider.
 
 Keys are Artistic Genius `sk-` tokens, and a token only works for the group it was created in (console → 令牌 → 新建令牌): a **Gemini-group** token in `AG_GEMINI_KEY`. A token from the wrong group gets `No available channel`.
 

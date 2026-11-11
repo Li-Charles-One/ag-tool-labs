@@ -728,7 +728,7 @@ def ensure_media_under_limit(
 BUILTIN_PROVIDERS = {
     "gemini": {
         "base_url": "https://artistic-genius.vip/v1",
-        "model": "gemini-3.8-flash-high",
+        "model": "gemini-3.8-flash",
         "api_style": "gemini",
         "key_envs": ("AG_GEMINI_KEY", "VISION_API_KEY"),
         "note": "Artistic Genius, Gemini group (native generateContent)",

@@ -1,0 +1,631 @@
+#!/usr/bin/env python3
+"""
+Genius Footage — overlay text sheet (花字表) for one edited video: `<clip>.overlays.md` + `.overlays.json`
++ `.overlays/` (storyboards), next to the clip.
+
+    python3 overlays.py <clip> [--fps 1] [--model M] [--output text|json]
+
+Steps: find — frames sampled at --fps on numbered storyboard sheets, the model names the cells each overlay
+is on → read — one full-resolution frame per 花字 / 人名条, the model copies the text and boxes it → edges —
+cells cropped around that box, every few frames (about 0.1 s) across the gap between two samples, the model
+picks the first / last cell where the overlay shows → measure.py cuts say how it enters and leaves.
+The model only names cells; every frame number comes from the sampling grid, timecode from measure.py.
+"""
+
+from __future__ import annotations
+
+import argparse
+import difflib
+import json
+import math
+import os
+import re
+import subprocess
+import sys
+from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime
+from pathlib import Path
+
+import client
+import measure
+import storyboard
+from client import VIDEO_EXTENSIONS, FootageError
+
+FIND_FPS = 1             # 京东.mp4 2026-11-05: 1 fps and 2 fps both found 20/20 overlays (shortest 2.2 s)
+EDGE_STEPS = 10          # the edge pass splits the gap between two samples into this many steps (0.1 s at 1 fps)
+EDGE_WIDEN = 2           # sample gaps searched further out when an overlay already shows at the run's outer end
+READ_PER_CALL = 20       # full-resolution frames per read request
+READ_MAX_W = 1920        # read frames wider than this are scaled down (one request stays small)
+READ_AT = 0.6            # read frame: this far into an overlay's samples, when multi-line ones show every line
+MARGIN = 0.1             # crop margin around the read box, share of frame width (128 px at 1280)
+CHECK_CELL, CHECK_COLS, CHECK_PER_SHEET = (480, 270), 4, 20   # check sheets: one overlay per row
+LOOK_MAX = 40            # cells in one --look strip
+TARGETS = ("花字", "人名条")
+
+FIND_PROMPT = (
+    "These images are storyboard sheets of one finished, edited video. Every cell is one exact frame. "
+    "Cells are sampled at a fixed interval in time order and labelled at the top-left with their number; "
+    "consecutive numbers are {gap:.2f}s apart. This sheet holds cells {first}–{last}.\n"
+    "Find every piece of text that was added on top of the picture in editing, and list each one once.\n"
+    "cat, pick one:\n"
+    "- 花字: designed caption or callout added in post (key phrases, selling points, often with decorative "
+    "lines, bars, boxes or sparkles), flat on the screen\n"
+    "- 人名条: name and title lower third\n"
+    "- 字牌: 3D text sign composited into the scene, in perspective and moving with the camera\n"
+    "- 标题卡: full-screen title or end card\n"
+    "- 图文: full-screen graphics or collage with text\n"
+    "- 标签: labels on CG or comparison shots\n"
+    "Do NOT list: dialogue subtitles (white lines at the bottom centre), watermarks (stock-footage or logo "
+    "marks), or text that physically exists in the filmed scene (screens, certificates, boxes, clothing, signs).\n"
+    "For each item: text = the exact text, lines separated by ' / '; cells = every cell where any part of it "
+    "(text, lines, bars, sparkles) is visible, as ranges of cell numbers, e.g. [\"0012-0018\", \"0020\"].\n"
+    'Return ONLY a JSON array: [{{"cat": "花字", "text": "…", "cells": ["0012-0018"]}}]. Return [] when the '
+    "sheet has none."
+)
+READ_PROMPT = (
+    "Each image is one full-resolution frame of an edited video, numbered at its top-left. Images in this "
+    "request: {ids}. For each image, list every piece of text added on top of the picture in editing: 花字 "
+    "(designed captions, flat on the screen), 人名条 (name lower thirds), 字牌 (3D text signs in the scene), "
+    "标题卡, 图文, 标签. Skip dialogue subtitles (white lines at the bottom centre), watermarks and text that "
+    "physically exists in the filmed scene.\n"
+    "text: copy it character by character exactly as it appears: keep letter case, keep or omit dots and "
+    "punctuation exactly as shown, and do not correct, complete or normalise brand names to a spelling you "
+    "know. Separate lines with ' / '. Write … for an unreadable character.\n"
+    "box: [ymin, xmin, ymax, xmax] on a 0–1000 scale over the image, tight around every element of that "
+    "overlay (text, lines, bars, sparkles, panels).\n"
+    'Return ONLY a JSON array, one object per image: [{"image": 1, "items": [{"cat": "花字", "text": "…", '
+    '"box": [ymin, xmin, ymax, xmax]}]}].'
+)
+EDGE_PROMPT = (
+    "These images are storyboard cells cropped around overlay text (花字 / 人名条) in one edited video. Every "
+    "cell is one exact frame. Each group is a run of frames in time order, labelled at the top-left: "
+    "NNa-1 … NNa-K runs across where overlay NN appears, NNb-1 … NNb-K across where it disappears. "
+    "Cells in a run are {every} frames apart.\n"
+    "Overlays: {texts}\n"
+    "a group: first = the first cell where any part of that overlay is visible (text, line, bar, dot, sparkle "
+    "or panel, even faint or partly drawn); readable = the first cell where its first line of text is complete "
+    "and legible, null if none; how = how it enters, under 12 Chinese characters (e.g. 淡入, 弹出, 逐字出现, "
+    "划入, 随镜头切入, 从字牌变形出字).\n"
+    "b group: last = the last cell where any part of it is still visible; how = how it leaves, under 12 "
+    "Chinese characters (e.g. 随镜头切走, 淡出, 划出, 直接消失).\n"
+    "Dialogue subtitles, watermarks, text in the scene and other overlays do not count. Use null when the "
+    "overlay shows in no cell of the run.\n"
+    'Return ONLY a JSON array, one object per group: [{"id": "03a", "first": "03a-4", "readable": "03a-6", '
+    '"how": "淡入"}, {"id": "03b", "last": "03b-7", "how": "随镜头切走"}].'
+)
+
+
+def _norm(s: str) -> str:
+    return re.sub(r"[\s/·•,，.。!！:：;；、…\-—\"'“”‘’()（）+]", "", s).lower()
+
+
+def _similar(a: str, b: str) -> float:
+    """Share of the shorter text found, in order, in the longer one."""
+    a, b = sorted((_norm(a), _norm(b)), key=len)
+    if not a:
+        return 0.0
+    return sum(m.size for m in difflib.SequenceMatcher(None, a, b, autojunk=False).get_matching_blocks()) / len(a)
+
+
+# ── 1. Find: which sampled cells show which overlay ─────────────────────
+
+def _cells(ranges, lo: int, hi: int) -> list[int]:
+    out = set()
+    for r in ranges if isinstance(ranges, list) else [ranges]:
+        nums = re.findall(r"\d+", str(r))
+        if nums:
+            out.update(k for k in range(int(nums[0]), int(nums[-1]) + 1) if lo <= k <= hi)
+    return sorted(out)
+
+
+def _runs(cells: list[int]) -> list[list[int]]:
+    """Consecutive cells as [first, last]; one missed cell inside a run is bridged."""
+    runs = []
+    for k in cells:
+        if runs and k - runs[-1][1] <= 2:
+            runs[-1][1] = k
+        else:
+            runs.append([k, k])
+    return runs
+
+
+def find(src: str, c: dict, v: dict, seek: list, out_dir: Path) -> list[dict]:
+    groups = [(f"{k:04d}", [(f"{k:04d}", f)]) for k, f in v["grid"].items()]
+    pages = storyboard.sheets(src, seek, v["fps"], groups, out_dir, "find")
+    v["storyboards"] += [str(p) for p, _ in pages]
+    print(f"[ag-footage] finding overlays on {len(groups)} cells, {len(pages)} sheets…", file=sys.stderr)
+    jobs = [([str(p)], FIND_PROMPT.format(gap=v["step"] / v["fps"], first=g[0], last=g[-1])) for p, g in pages]
+    found = []
+    for (p, g), ans in zip(pages, client.ask(c, jobs, None, v["errors"])):
+        if ans is None:
+            v["warnings"].append(f"no answer for {p.name}: overlays on cells {g[0]}–{g[-1]} may be missing")
+            continue
+        for it in ans:
+            if str(it.get("text", "")).strip():
+                for run in _runs(_cells(it.get("cells"), int(g[0]), int(g[-1]))):
+                    found.append({"cat": str(it.get("cat", "")).strip(), "text": str(it["text"]).strip(), "cells": run})
+    found.sort(key=lambda o: o["cells"][0])
+    merged = []  # the same overlay across a sheet edge, or listed twice
+    for o in found:
+        m = next((x for x in merged if (x["cat"] in TARGETS) == (o["cat"] in TARGETS)
+                  and o["cells"][0] <= x["cells"][1] + 2 and _similar(x["text"], o["text"]) >= 0.5), None)
+        if m:
+            m["cells"][1] = max(m["cells"][1], o["cells"][1])
+            m["text"] = max(m["text"], o["text"], key=len)
+        else:
+            merged.append(o)
+    return merged
+
+
+# ── 2. Read: exact text and box from one full-resolution frame ──────────
+
+def read(src: str, c: dict, v: dict, seek: list, out_dir: Path, targets: list) -> None:
+    w = min(v["width"], READ_MAX_W)
+    h = round(v["height"] * w / v["width"] / 2) * 2
+    for t in targets:
+        a, b = t["cells"]
+        t["read_frame"] = v["grid"][a + int((b - a + 1) * READ_AT)]
+    pix = storyboard.grab(src, seek, v["fps"], [(t["read_frame"], None) for t in targets], (w, h))
+    files = []
+    for k, t in enumerate(targets, 1):
+        cell = bytearray(pix[t["read_frame"], None])
+        storyboard.label(cell, str(k), w)
+        path = out_dir / f"read_{k:02d}.jpg"
+        subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "rawvideo", "-pix_fmt", "rgb24", "-s",
+                        f"{w}x{h}", "-i", "-", "-q:v", "2", str(path)],
+                       input=bytes(cell), check=True)
+        files.append(str(path))
+    batches = [list(range(i, min(i + READ_PER_CALL, len(files)))) for i in range(0, len(files), READ_PER_CALL)]
+    print(f"[ag-footage] reading {len(files)} overlays at full resolution…", file=sys.stderr)
+    jobs = [([files[i] for i in b], READ_PROMPT.replace("{ids}", f"{b[0] + 1}–{b[-1] + 1}")) for b in batches]
+    by_img = {}
+    for ans in client.ask(c, jobs, None, v["errors"]):
+        for r in ans or []:
+            if str(r.get("image", "")).isdigit():
+                by_img[int(r["image"])] = [x for x in r.get("items") or [] if isinstance(x, dict)]
+    for k, t in enumerate(targets, 1):
+        t["read_image"] = files[k - 1]
+        if k not in by_img:
+            t["review"].append("原尺寸画面没有返回结果，文字用的是抽样故事板上的")
+            continue
+        items = [x for x in by_img[k] if str(x.get("text", "")).strip()]
+        if not items:  # looked and saw no added text: a 3D sign or scene text taken for a 花字 on the sheet
+            t["unread"] = True
+            continue
+        best = max(items, key=lambda x: _similar(str(x["text"]), t["text"]))
+        if _similar(str(best["text"]), t["text"]) < 0.5:
+            t["review"].append(f"原尺寸读到的文字和故事板上差别大（故事板上是「{t['text']}」）")
+        t["text"] = str(best["text"]).strip()
+        cat = str(best.get("cat", "")).strip()
+        t["cat"] = cat if cat in TARGETS or cat == "字牌" else t["cat"]
+        box = best.get("box")
+        if isinstance(box, list) and len(box) == 4 and all(isinstance(x, (int, float)) for x in box) \
+                and box[2] > box[0] and box[3] > box[1]:
+            t["box"] = [max(0, min(1000, x)) for x in box]
+
+
+# ── 3. Edges: first / last frame from cropped runs of frames ────────────
+
+def _crop(box: list | None, w: int, h: int) -> tuple | None:
+    if not box:
+        return None
+    m = MARGIN * w
+    x0, x1 = max(0.0, box[1] * w / 1000 - m), min(float(w), box[3] * w / 1000 + m)
+    y0, y1 = max(0.0, box[0] * h / 1000 - m), min(float(h), box[2] * h / 1000 + m)
+    x, y = int(x0) // 2 * 2, int(y0) // 2 * 2
+    return x, y, max(16, int(x1 - x) // 2 * 2), max(16, int(y1 - y) // 2 * 2)
+
+
+def _strip(lo: int, hi: int, every: int) -> list[int]:
+    return sorted(set(range(lo, hi, every)) | {hi})
+
+
+def _edge_pass(src: str, c: dict, v: dict, seek: list, out_dir: Path, strips: dict, targets: list,
+               every: int, prefix: str) -> dict:
+    """strips: {group id like '03a': [frames]} → {group id: answer}."""
+    if not strips:
+        return {}
+    crops = {g: _crop(targets[int(g[:-1]) - 1].get("box"), v["width"], v["height"]) for g in strips}
+    groups = [(g, [(f"{g}-{k}", f) for k, f in enumerate(fr, 1)]) for g, fr in strips.items()]
+    pages = storyboard.sheets(src, seek, v["fps"], groups, out_dir, prefix, crops)
+    v["storyboards"] += [str(p) for p, _ in pages]
+    jobs = []
+    for p, gids in pages:
+        nums = dict.fromkeys(g[:-1] for g in gids)
+        texts = "; ".join(f"{n} = 「{targets[int(n) - 1]['text']}」" for n in nums)
+        jobs.append(([str(p)], EDGE_PROMPT.replace("{every}", str(every)).replace("{texts}", texts)))
+    print(f"[ag-footage] edges ({prefix}): {len(strips)} runs on {len(pages)} sheets…", file=sys.stderr)
+    got = {}
+    for (_, gids), ans in zip(pages, client.ask(c, jobs, [g for _, g in pages], v["errors"])):
+        for it in ans or []:
+            if str(it.get("id")) in gids:
+                got.setdefault(str(it["id"]), it)
+    return got
+
+
+def _index(label, gid: str, n: int) -> int | None:
+    """'03a-4' → 4 when it names a cell of group gid."""
+    m = re.fullmatch(r"\s*(\d+[ab])-(\d+)\s*", str(label or ""))
+    return int(m[2]) if m and m[1].lstrip("0") == gid.lstrip("0") and 1 <= int(m[2]) <= n else None
+
+
+def edges(src: str, c: dict, v: dict, seek: list, out_dir: Path, targets: list) -> None:
+    last, step = v["frames"] - 1, v["step"]
+    every = max(1, math.ceil(step / EDGE_STEPS))
+    pending = {}
+    for n, t in enumerate(targets, 1):
+        a, b = t["cells"]
+        p0, p1 = v["grid"][a], v["grid"][b]
+        t["in"], t["out"] = p0, p1          # fallbacks: the first / last sample that shows it
+        if p0 > 0:
+            pending[f"{n:02d}a"] = _strip(p0 - step, p0, every)
+        if p1 < last:
+            pending[f"{n:02d}b"] = _strip(p1, min(last, p1 + step), every)
+    for rnd in range(1, EDGE_WIDEN + 2):
+        ans = _edge_pass(src, c, v, seek, out_dir, pending, targets, every, f"edges{rnd}")
+        wider = {}
+        for g, fr in pending.items():
+            t, kind, it = targets[int(g[:-1]) - 1], g[-1], ans.get(g, {})
+            if g not in ans:
+                t["review"].append(f"{'入点' if kind == 'a' else '出点'}没有返回判断，用的是抽样帧")
+                continue
+            if it.get("how") and (rnd == 1 or not t.get("how_in" if kind == "a" else "how_out")):
+                t["how_in" if kind == "a" else "how_out"] = str(it["how"]).strip()
+            if kind == "a":
+                r = _index(it.get("readable"), g, len(fr))
+                if r is not None:  # a wider run is earlier in time, so a hit there wins
+                    t["readable"] = fr[r - 1]
+            k = _index(it.get("first" if kind == "a" else "last"), g, len(fr))
+            edge = "入点" if kind == "a" else "出点"
+            if k is None:
+                t["review"].append(f"裁切画面里没认出{'入场' if kind == 'a' else '出场'}，{edge}用的是抽样帧")
+            elif kind == "a" and k == 1:   # already showing where the samples said it was not: look earlier
+                t["in"] = fr[0]
+                if fr[0] > 0 and rnd <= EDGE_WIDEN:
+                    wider[g] = _strip(max(0, fr[0] - step), fr[0], every)
+                elif fr[0] > 0:
+                    t["review"].append(f"入点可能早于 f{fr[0]}")
+            elif kind == "b" and k == len(fr):
+                t["out"] = fr[-1]
+                if fr[-1] < last and rnd <= EDGE_WIDEN:
+                    wider[g] = _strip(fr[-1], min(last, fr[-1] + step), every)
+                elif fr[-1] < last:
+                    t["review"].append(f"出点可能晚于 f{fr[-1]}")
+            else:
+                t["in" if kind == "a" else "out"] = fr[k - 1]
+        pending = wider
+        if not pending:
+            break
+    for t in targets:
+        if t.get("readable") is not None and t["readable"] < t["in"]:
+            t["readable"] = t["in"]
+
+
+# ── 4. How it enters and leaves, from measured cuts ─────────────────────
+
+def relations(t: dict, shots: list, fps: float, last: int, every: int) -> None:
+    cuts, half = [s["first"] for s in shots[1:]], round(fps / 2)
+    # An edge is known to one cell (every frames); a measured cut inside that cell is where it enters / leaves.
+    snap = [x for x in cuts if t["in"] - every < x <= t["in"]]
+    if snap:
+        t["in"] = snap[-1]
+    snap = [x for x in cuts if t["out"] < x <= t["out"] + every]
+    if snap:
+        t["out"] = snap[0] - 1
+    i, o = t["in"], t["out"]
+    inside = [x for x in cuts if i < x <= o]
+    head = inside[0] if inside and inside[0] - i <= half else None      # shows up just before a cut
+    tail = inside[-1] if inside and o - inside[-1] < half and o + 1 not in cuts else None  # lingers past one
+    if i in cuts:
+        enter = "随切点出现"
+    elif head is not None:
+        enter = f"切点 f{head} 前 {head - i} 帧，先在上一个镜头出现"
+        # real early entries and text in the previous shot taken for the overlay look the same here
+        t["review"].append(f"入点在切点 f{head} 之前（先在上一个镜头出现），请看一眼是不是它")
+    else:
+        near = [x for x in cuts if 0 < i - x <= half]
+        enter = f"切点 f{near[-1]} 后 {i - near[-1]} 帧出现" if near else "在镜头内出现"
+    if o == last:
+        leave = "持续到片尾"
+    elif o + 1 in cuts:
+        leave = "随镜头切走"
+    elif tail is not None:
+        leave = f"切点 f{tail} 后又留 {o - tail + 1} 帧"
+    else:
+        shot = next(s for s in shots if s["first"] <= o <= s["last"])
+        leave = f"在镜头内消失（这个镜头到 f{shot['last']}）"
+    t["enter"], t["leave"] = enter, leave
+    t["crosses_cuts"] = [x for x in inside if x not in (head, tail)]
+
+
+def _position(box: list | None) -> str:
+    if not box:
+        return "—"
+    cx, cy = (box[1] + box[3]) / 2000, (box[0] + box[2]) / 2000
+    col, row = "左中右"[min(2, int(cx * 3))], "上中下"[min(2, int(cy * 3))]
+    return "居中" if col == row == "中" else f"{col}{row}"
+
+
+# ── Run and render ───────────────────────────────────────────────────────
+
+def run(src: str, c: dict, fps_find: float = FIND_FPS) -> dict:
+    clip = Path(src)
+    base = clip.with_suffix("")
+    if not os.access(clip.parent, os.W_OK):
+        raise FootageError("UNSUPPORTED_FORMAT", f"cannot write the overlay sheet next to the clip: {clip.parent}")
+    out_dir = Path(f"{base}.overlays")
+    out_dir.mkdir(parents=True, exist_ok=True)
+    for old in out_dir.glob("*.jpg"):  # storyboards of an earlier run would mix with this one's
+        old.unlink()
+    try:
+        info = measure.probe(src)
+        seek = measure.frame_times(src, for_seek=True)
+    except measure.MeasureError as e:
+        raise FootageError("DEPENDENCY_MISSING" if "not found on PATH" in str(e) else "UNSUPPORTED_FORMAT", str(e))
+    fps = float(info["fps"])
+    step = max(1, round(fps / fps_find))
+    v = {"fps": fps, "width": info["width"], "height": info["height"], "frames": len(seek), "step": step,
+         "grid": {k + 1: f for k, f in enumerate(range(0, len(seek), step))}, "storyboards": [], "warnings": [],
+         "errors": []}  # errors: model requests that failed twice (client.ask)
+    bg = ThreadPoolExecutor(1)
+    cuts_job = bg.submit(client.cached, src, "measure", lambda: measure.measure(src), measure.__file__)  # needed at the end
+
+    found = find(src, c, v, seek, out_dir)
+    if v["errors"] and not found:
+        raise v["errors"][0]  # the model gave nothing at all (bad key, gateway down)
+    targets = [dict(o, review=[]) for o in found if o["cat"] in TARGETS]
+    others = [o for o in found if o["cat"] not in TARGETS]
+    if targets:
+        read(src, c, v, seek, out_dir, targets)
+        for t in targets:
+            if t.get("unread"):
+                t["cat"] = "字牌或实拍文字"
+                v["warnings"].append(f"「{t['text']}」原尺寸画面上没认出叠加文字（多半是 3D 字牌或实拍文字），已归入其他包装")
+        others += [t for t in targets if t["cat"] == "字牌" or t.get("unread")]
+        targets = [t for t in targets if t["cat"] != "字牌" and not t.get("unread")]
+    if targets:
+        edges(src, c, v, seek, out_dir, targets)
+    try:
+        r = cuts_job.result()
+    except measure.MeasureError as e:
+        raise FootageError("UNSUPPORTED_FORMAT", str(e))
+    bg.shutdown()
+    v["warnings"] += list(dict.fromkeys(f"模型请求失败 [{e.code}]：{e}" for e in v["errors"]))
+    _, tc, _, times = measure._clock(src, str(info["fps"]), info["timecode"])
+    last = r["frames"] - 1
+    t_of = lambda f: times[f] if f < len(times) else f / fps  # noqa: E731
+    counter = {"花字": 0, "人名条": 0}
+    for t in sorted(targets, key=lambda x: x["in"]):
+        t["out"] = min(t["out"], last)
+        relations(t, r["shots"], fps, last, max(1, math.ceil(step / EDGE_STEPS)))
+        counter[t["cat"]] += 1
+        t["id"] = f"H{counter['花字']:02d}" if t["cat"] == "花字" else f"N{counter['人名条']}"
+        t.update(tc_in=tc(t["in"]), tc_out=tc(t["out"]), frames=t["out"] - t["in"] + 1,
+                 seconds=round(t_of(t["out"]) - t_of(t["in"]) + 1 / fps, 2), position=_position(t.get("box")),
+                 box_px=[round(t["box"][1] * v["width"] / 1000), round(t["box"][0] * v["height"] / 1000),
+                         round((t["box"][3] - t["box"][1]) * v["width"] / 1000),
+                         round((t["box"][2] - t["box"][0]) * v["height"] / 1000)] if t.get("box") else None)
+    targets.sort(key=lambda x: (x["cat"] != "花字", x["in"]))
+    every = max(1, math.ceil(step / EDGE_STEPS))
+    checks = check_sheets(src, v, seek, out_dir, targets, every) if targets else []
+    for o in others:
+        a, b = (v["grid"][k] for k in o["cells"])
+        o.update(first=a, last=b, start=round(t_of(a), 1), end=round(t_of(b), 1))
+    review = [f"{t['id']}：{x}" for t in targets for x in t["review"]]
+    doc = {"tool": "ag-footage overlays.py", "file": clip.name, "generated":
+           datetime.now().astimezone().isoformat(timespec="seconds"), "model": c["model"],
+           "width": v["width"], "height": v["height"], "fps": round(fps, 3), "frames": r["frames"],
+           "duration": r["duration"], "timecode_start": info["timecode"], "sample_every_frames": step,
+           "edge_every_frames": every, "cuts": [s["first"] for s in r["shots"][1:]], "check_sheets": checks,
+           "status": "needs_review" if review or v["warnings"] else "ok",
+           "counts": {"花字": counter["花字"], "人名条": counter["人名条"], "其他包装": len(others)},
+           "overlays": [{k: t.get(k) for k in ("id", "cat", "text", "in", "out", "tc_in", "tc_out", "frames",
+                                               "seconds", "readable", "position", "box", "box_px", "enter",
+                                               "how_in", "crosses_cuts", "leave", "how_out", "cells",
+                                               "read_frame", "read_image", "review")} for t in targets],
+           "others": [{k: o[k] for k in ("cat", "text", "first", "last", "start", "end")} for o in others],
+           "review": review, "warnings": v["warnings"] + r["warnings"], "storyboards": v["storyboards"]}
+    md_path, json_path = Path(f"{base}.overlays.md"), Path(f"{base}.overlays.json")
+    md_path.write_text(render_md(doc), encoding="utf-8")
+    json_path.write_text(json.dumps(doc, ensure_ascii=False, indent=1), encoding="utf-8")
+    return {"overlays_md": str(md_path), "overlays_json": str(json_path), "status": doc["status"],
+            "counts": doc["counts"], "review": review, "warnings": doc["warnings"], "check_sheets": checks}
+
+
+# ── Agent check: check sheets, --look, --fix ─────────────────────────────
+
+def check_sheets(src: str, v: dict, seek: list, out_dir: Path, targets: list, every: int) -> list[str]:
+    """One row per overlay, cropped to its box: ID-1 one cell before 入点 (should not show it), ID-2 入点,
+    ID-3 出点, ID-4 one cell after 出点 (should not show it)."""
+    last = v["frames"] - 1
+    groups = [(t["id"], [(f"{t['id']}-{k}", f) for k, f in enumerate(
+        (max(0, t["in"] - every), t["in"], t["out"], min(last, t["out"] + every)), 1)]) for t in targets]
+    crops = {t["id"]: _crop(t.get("box"), v["width"], v["height"]) for t in targets}
+    return [str(p) for p, _ in storyboard.sheets(src, seek, v["fps"], groups, out_dir, "check", crops,
+                                                 CHECK_CELL, CHECK_COLS, CHECK_PER_SHEET)]
+
+
+def _load(src: str) -> tuple[Path, dict]:
+    path = Path(f"{Path(src).with_suffix('')}.overlays.json")
+    if not path.is_file():
+        raise FootageError("INPUT_NOT_FOUND", f"no overlay sheet yet: {path} (run overlays.py on the clip first)")
+    return path, json.loads(path.read_text(encoding="utf-8"))
+
+
+def look(src: str, oid: str, span: str) -> str:
+    """Frames FIRST-LAST[:STEP] cropped to overlay oid ('full' = whole frame), each cell labelled with its frame."""
+    _, doc = _load(src)
+    m = re.fullmatch(r"(\d+)-(\d+)(?::(\d+))?", span)
+    if not m or int(m[2]) < int(m[1]):
+        raise FootageError("UNSUPPORTED_FORMAT", f"frames as FIRST-LAST or FIRST-LAST:STEP, not {span!r}")
+    frames = list(range(int(m[1]), min(int(m[2]), doc["frames"] - 1) + 1, int(m[3] or 1)))
+    if len(frames) > LOOK_MAX:
+        raise FootageError("UNSUPPORTED_FORMAT", f"{len(frames)} frames: at most {LOOK_MAX}, use a STEP")
+    box = None
+    if oid != "full":
+        o = next((x for x in doc["overlays"] if x["id"] == oid), None)
+        if o is None:
+            raise FootageError("INPUT_NOT_FOUND", f"no overlay {oid} in the sheet")
+        box = o.get("box")
+    out_dir = Path(f"{Path(src).with_suffix('')}.overlays")
+    pages = storyboard.sheets(src, measure.frame_times(src, for_seek=True), doc["fps"],
+                              [("look", [(str(f), f) for f in frames])], out_dir, f"look_{oid}_{frames[0]}-{frames[-1]}",
+                              {"look": _crop(box, doc["width"], doc["height"])}, CHECK_CELL, 5, LOOK_MAX)
+    return str(pages[0][0])
+
+
+def fix(src: str, edits: list[str]) -> dict:
+    """Apply the agent's corrections ('N1 in=1149', 'H07 out=9097', 'H06 text=…', 'H12 drop'), recompute
+    timecode, duration and enter / leave wording, and record the check. No edits: checked, nothing to change."""
+    path, doc = _load(src)
+    fps, last = doc["fps"], doc["frames"] - 1
+    nominal = round(fps)
+    start, df = measure.tc_to_frames(doc["timecode_start"], nominal) if doc.get("timecode_start") else (0, False)
+    edges_ = [0] + doc["cuts"] + [doc["frames"]]
+    shots = [{"first": a, "last": b - 1} for a, b in zip(edges_, edges_[1:])]
+    by_id, changes = {o["id"]: o for o in doc["overlays"]}, []
+    for e in edits:
+        m = re.fullmatch(r"\s*(\S+)\s+(in|out|text|drop)(?:=(.+))?\s*", e, re.S)
+        if not m or m[1] not in by_id or (m[2] != "drop") != bool(m[3]):
+            raise FootageError("UNSUPPORTED_FORMAT", f"edit as 'ID in=N', 'ID out=N', 'ID text=…' or 'ID drop', not {e!r}")
+        o, key, val = by_id[m[1]], m[2], (m[3] or "").strip()
+        if key == "drop":
+            doc["overlays"].remove(o)
+            doc["others"].append({"cat": "核对后剔除", "text": o["text"], "first": o["in"], "last": o["out"],
+                                  "start": round(o["in"] / fps, 1), "end": round(o["out"] / fps, 1)})
+            changes.append(f"{o['id']}：剔除（{o['text']}）")
+            continue
+        if key == "text":
+            changes.append(f"{o['id']}：文字「{o['text']}」改为「{val}」")
+            o["text"] = val
+            continue
+        if not val.isdigit() or not 0 <= int(val) <= last:
+            raise FootageError("UNSUPPORTED_FORMAT", f"{e!r}: a frame number from 0 to {last}")
+        changes.append(f"{o['id']}：{'入点' if key == 'in' else '出点'} f{o[key]} 改为 f{val}")
+        o[key] = int(val)
+        if o["in"] > o["out"]:
+            raise FootageError("UNSUPPORTED_FORMAT", f"{o['id']}: 入点 f{o['in']} after 出点 f{o['out']}")
+        relations(o, shots, fps, last, 0)  # the agent's frame stands: no snapping
+        o.update(tc_in=measure.frames_to_tc(start + o["in"], nominal, df),
+                 tc_out=measure.frames_to_tc(start + o["out"], nominal, df),
+                 frames=o["out"] - o["in"] + 1, seconds=round((o["out"] - o["in"] + 1) / fps, 2))
+        if o.get("readable") is not None and not o["in"] <= o["readable"] <= o["out"]:
+            o["readable"] = None
+    for o in doc["overlays"]:
+        o["review"] = []
+    doc["counts"].update({c: sum(o["cat"] == c for o in doc["overlays"]) for c in TARGETS}, 其他包装=len(doc["others"]))
+    doc["agent_check"] = {"at": datetime.now().astimezone().isoformat(timespec="seconds"), "changes": changes,
+                          "model_review": doc["review"] + doc["warnings"]}
+    doc["status"] = "ok"
+    path.write_text(json.dumps(doc, ensure_ascii=False, indent=1), encoding="utf-8")
+    md_path = path.with_name(path.name.replace(".overlays.json", ".overlays.md"))
+    md_path.write_text(render_md(doc), encoding="utf-8")
+    return {"overlays_md": str(md_path), "changes": changes}
+
+
+def _note(t: dict) -> str:
+    parts = [t["enter"] + (f"，{t['how_in']}" if t.get("how_in") else "")]
+    if t["crosses_cuts"]:
+        parts.append("跨切点 " + " / ".join(f"f{x}" for x in t["crosses_cuts"]))
+    parts.append(t["leave"] + (f"，{t['how_out']}" if t.get("how_out") else ""))
+    return "；".join(parts)
+
+
+def render_md(doc: dict) -> str:
+    fps, dur, every = doc["fps"], doc["duration"], doc["edge_every_frames"]
+    lines = [f"# {doc['file']} 花字表", "",
+             f"- 源文件：`{doc['file']}`，{doc['width']}×{doc['height']}，{fps:g}fps，{doc['frames']} 帧，"
+             f"{int(dur // 60)}:{dur % 60:05.2f}",
+             f"- 生成：{doc['generated']}，ag-footage overlays.py，模型 {doc['model']}。每 {doc['sample_every_frames']} "
+             f"帧抽一帧找花字，原尺寸画面认字，再裁出花字区域、每 {every} 帧一格定入点和出点",
+             f"- 帧号从 0 开始；时间码格式为 `时:分:秒:帧`，每秒 {round(fps)} 帧",
+             f"- 入出点是给剪辑的参考，精度约 {every} 帧（{every / fps:.2f} 秒）："
+             "**入点** = 看得到任何元素（包括先出的线条、底条、闪光）的第一格；**出点** = 还看得到的最后一格（含这一帧），"
+             "剪辑软件里出点通常要填「出点帧 + 1」",
+             "- **可读** = 第一行文字完整可读的第一格",
+             "- **框** = 模型在原尺寸画面上框的大致范围（像素 x,y 宽×高），没有逐像素测量，盖旧花字前请外扩",
+             "- 不算进来的：底部台词字幕、水印、画面里实拍到的文字",
+             f"- 状态：**{doc['status']}**" + ("（Agent 已核对，见文末）" if doc.get("agent_check") else "")]
+    if doc.get("check_sheets"):
+        lines.append(f"- 核对图：`{Path(doc['check_sheets'][0]).parent.name}/check_*.jpg`，每行一个："
+                     "1 入点前一格（应看不到）· 2 入点 · 3 出点 · 4 出点后一格（应看不到）")
+    lines.append("")
+    for n, cat in enumerate(TARGETS):
+        rows = [t for t in doc["overlays"] if t["cat"] == cat]
+        lines += [f"## {'一二'[n]}、{cat}：共 {len(rows)} 个", ""]
+        if rows:
+            lines += ["| 编号 | 文字（/ 表示换行） | 入点 帧 · 时间码 | 出点 帧 · 时间码 | 时长 | 可读 | 位置 · 框 | 入场 / 出场 |",
+                      "|---|---|---|---|---|---|---|---|"]
+            for t in rows:
+                box = f" · {t['box_px'][0]},{t['box_px'][1]} {t['box_px'][2]}×{t['box_px'][3]}" if t["box_px"] else ""
+                lines.append(f"| {t['id']} | {t['text']} | f{t['in']} · {t['tc_in']} | f{t['out']} · {t['tc_out']} "
+                             f"| {t['frames']} 帧 · {t['seconds']:.2f}s | {'f' + str(t['readable']) if t['readable'] is not None else '—'} "
+                             f"| {t['position']}{box} | {_note(t)} |")
+            lines.append("")
+    step_s = doc["sample_every_frames"] / fps
+    lines += [f"## 三、其他包装文字（不算花字，只列抽样时间，误差约 ±{step_s:g} 秒）", ""]
+    seen = {}
+    for o in doc["others"]:
+        key = next((k for k in seen if k[0] == o["cat"] and _similar(k[1], o["text"]) >= 0.8), (o["cat"], o["text"]))
+        seen.setdefault(key, []).append(f"{o['start']:g}–{o['end']:g}s")
+    lines += [f"- **{cat}**「{text}」：{'、'.join(spans)}" for (cat, text), spans in seen.items()] or ["- 无"]
+    ac = doc.get("agent_check")
+    if ac:
+        lines += ["", f"## 核对（Agent，{ac['at']}）", "",
+                  f"- 按核对图逐条看过全部 {len(doc['overlays'])} 条，" + ("改动如下：" if ac["changes"] else "大致正确，没有改动")]
+        lines += [f"  - {x}" for x in ac["changes"]]
+        if ac["model_review"]:
+            lines += ["- 模型标出的待复核，已一并核对："] + [f"  - {x}" for x in ac["model_review"]]
+    else:
+        lines += ["", "## 待复核", ""] + ([f"- {x}" for x in doc["review"] + doc["warnings"]] or ["- 无"])
+    return "\n".join(lines) + "\n"
+
+
+def render_result(res: dict) -> str:
+    c = res["counts"]
+    lines = [f"状态：**{res['status']}** · 花字 {c['花字']} · 人名条 {c['人名条']} · 其他包装 {c['其他包装']}",
+             f"花字表：`{res['overlays_md']}`", f"数据：`{res['overlays_json']}`",
+             "核对图：" + "、".join(f"`{x}`" for x in res["check_sheets"])]
+    return "\n".join(lines + [f"待复核：{x}" for x in res["review"]] + [f"⚠️ {w}" for w in res["warnings"]])
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Overlay text sheet (花字 / 人名条) for one video, with an agent check")
+    parser.add_argument("file", help="Local video file")
+    parser.add_argument("--fps", type=float, default=FIND_FPS,
+                        help=f"Samples per second for finding overlays (default {FIND_FPS}; 2 for overlays under ~1 s)")
+    parser.add_argument("--model", "-m", default=None, help="Model override (default FOOTAGE_MODEL or gemini-3.8-flash)")
+    parser.add_argument("--output", "-o", choices=["text", "json"], default="text")
+    parser.add_argument("--look", nargs=2, metavar=("ID", "FIRST-LAST[:STEP]"),
+                        help="Agent check: frames cropped to overlay ID ('full' = whole frame), labelled with frame numbers")
+    parser.add_argument("--fix", nargs="*", metavar="EDIT",
+                        help="Agent check: apply 'ID in=N' / 'ID out=N' / 'ID text=…' / 'ID drop'; none = checked, no change")
+    args = parser.parse_args()
+    c = client.conf(args.model)
+    try:
+        if not Path(args.file).is_file():
+            raise FootageError("INPUT_NOT_FOUND", f"File not found: {args.file}")
+        if Path(args.file).suffix.lower() not in VIDEO_EXTENSIONS:
+            raise FootageError("UNSUPPORTED_FORMAT", "overlays needs a local video file")
+        if args.look:
+            print(look(args.file, *args.look))
+            return
+        if args.fix is not None:
+            res = fix(args.file, args.fix)
+            print(f"花字表：`{res['overlays_md']}`\n" + ("\n".join(res["changes"]) or "已核对，没有改动"))
+            return
+        if not c["api_key"]:
+            raise FootageError("PROVIDER_ERROR", "API key not found: set AG_GEMINI_KEY in scripts/.env")
+        res = run(args.file, c, args.fps)
+        print(json.dumps(res, ensure_ascii=False, indent=2) if args.output == "json"
+              else f"## Overlays\n\n{render_result(res)}")
+    except FootageError as e:
+        print(f"Error [{e.code}]: {e}", file=sys.stderr)
+        sys.exit(client.EXIT_CODES.get(e.code, 1))
+    except Exception as e:
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()

@@ -2,7 +2,7 @@
 name: ag-footage
 description: "通过 Artistic Genius 做素材说明书：给一条视频（素材或成片）生成剪辑用的 .footage.md：逐帧精确的镜头表、带说话人和可下刀点的台词表、人物、内容分段、金句、重拍与废片、可能听错的词；口播（一镜到底、单人对镜头讲）可加口播模式，另出停顿、语气词、句内重复起头和按字精确到帧的精剪建议；拉片模式给一条或几条参考片（本地文件或链接）出拉片报告：结构与叙事、节奏数据与剪辑手法、视听语言、包装和可借鉴手法，几条一起拉时另出一份汇总对比；多条素材并行；视频下载模式只下载链接（B 站、抖音、小红书等）；也可只出逐帧精确的镜头表，或只出花字表（成片里每个花字、人名条的原文、入点出点、位置和出场方式）。用户说「给这条素材做说明书」「帮我筛一下这条素材」「这条素材能用哪些、哪句可以下刀」「一共几个镜头、每个镜头第几帧到第几帧」「先把这个片子逐帧过一遍」「这条口播帮我出说明书和精剪建议」「口播里哪些停顿、口误、重复要剪掉」「这片子一共多少花字、每个什么时候出现」「把花字时间扒出来，我要重做花字」「帮我拉一下这几条参考片」「拉片，看看人家怎么剪的」「这几条素材一起跑说明书」「把这几个链接的视频下下来」时使用。需要 Artistic Genius 的 Gemini 标准分组令牌（模型）和 Omni 创作优选分组令牌（语音识别、抖音与小红书链接解析）。不要用于一般的视频总结或点评、单纯语音转文字（用 ag-omni），不要用于实际剪辑、拼时间线、导出或生成视频（口播模式只给精剪建议）。"
 metadata:
-  version: "1.0.0"
+  version: "1.0.1"
 ---
 
 # AG Footage（素材说明书）
@@ -35,7 +35,7 @@ Keys are Artistic Genius `sk-` tokens, and a token only works for the group it w
 
 | Variable | Group | Pays for |
 |---|---|---|
-| `AG_GEMINI_KEY` | Gemini 标准 | every model request (`gemini-3.8-flash`, native `generateContent`); required |
+| `AG_GEMINI_KEY` | Gemini 标准 | every model request (`gemini-4-hydrogen-xhigh`, native `generateContent`); required |
 | `AG_OMNI_KEY` | Omni 创作优选 | speech recognition (Doubao file ASR 2.0, billed by the audio second, two passes a clip) and 抖音 / 小红书 link parsing (billed per successful call) |
 
 A token from the wrong group gets `No available channel`. Without `AG_OMNI_KEY` the transcript is skipped (status `needs_review`) and 抖音 / 小红书 links fall back to the browser route. Optional: `AG_BASE_URL` (default `https://artistic-genius.vip/v1`), `FOOTAGE_MODEL`. Never ask for a token in chat: the user writes it into `scripts/.env`.

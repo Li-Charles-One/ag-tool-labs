@@ -6,7 +6,7 @@ Artistic Genius), the HTTP retry loop, storyboard questions asked side by side (
     AG_GEMINI_KEY                      required: an Artistic Genius token of the Gemini 标准 group (models)
     AG_OMNI_KEY                        an Artistic Genius token of the Omni 创作优选 group (speech, 抖音 / 小红书 links)
     AG_BASE_URL                        default https://artistic-genius.vip/v1
-    FOOTAGE_MODEL                      default gemini-3.8-flash
+    FOOTAGE_MODEL                      default gemini-4-hydrogen-xhigh
     FOOTAGE_MAX_REQUESTS               model requests in flight across all clips of one run (default 8)
 """
 
@@ -33,7 +33,7 @@ from functools import lru_cache
 from pathlib import Path
 
 DEFAULT_BASE_URL = "https://artistic-genius.vip/v1"
-DEFAULT_MODEL = "gemini-3.8-flash"
+DEFAULT_MODEL = "gemini-4-hydrogen-xhigh"
 RETRY_HTTP = {429, 500, 502, 503, 504}
 RETRY_DELAYS = (5, 15, 30)
 REFUSAL_RE = re.compile(r"content (?:policy|filter)", re.I)   # short canned refusals

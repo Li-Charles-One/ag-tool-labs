@@ -2,14 +2,14 @@
 name: ag-omni
 description: "通过 Artistic Genius 做多模态视听分析：图像理解、UI 界面分析、文档/PDF OCR 文字提取，以及音视频总结与语音转写。需要 Artistic Genius 的 Gemini 分组令牌。不要用于生成图片视频，或品牌设计规范（用 genius-design）。"
 metadata:
-  version: "1.1.0"
+  version: "1.1.1"
 ---
 
 # AG Omni（视听）
 
 This skill exists to **analyze images**, **analyze video/audio**, and **OCR**. Nothing else.
 
-Everything goes through [Artistic Genius](https://artistic-genius.vip). Default provider `gemini`: `gemini-3.8-flash` via native Gemini `generateContent`. Any other multimodal endpoint can be configured as a custom provider.
+Everything goes through [Artistic Genius](https://artistic-genius.vip). Default provider `gemini`: `gemini-4-hydrogen-xhigh` via native Gemini `generateContent`. Any other multimodal endpoint can be configured as a custom provider.
 
 Keys are Artistic Genius `sk-` tokens, and a token only works for the group it was created in (console → 令牌 → 新建令牌): a **Gemini-group** token in `AG_GEMINI_KEY`. A token from the wrong group gets `No available channel`.
 

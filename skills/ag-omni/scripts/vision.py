@@ -728,7 +728,7 @@ def ensure_media_under_limit(
 BUILTIN_PROVIDERS = {
     "gemini": {
         "base_url": "https://artistic-genius.vip/v1",
-        "model": "gemini-3.8-flash",
+        "model": "gemini-4-hydrogen-xhigh",
         "api_style": "gemini",
         "key_envs": ("AG_GEMINI_KEY", "VISION_API_KEY"),
         "note": "Artistic Genius, Gemini group (native generateContent)",
@@ -1010,10 +1010,14 @@ def call_model(conf: dict, media: list, prompt: str, timeout: float, show_think:
     key, model = conf["api_key"], conf["model"]
     if conf["api_style"] == "gemini":
         parts = [_gemini_part(src, kind) for src, kind in media] + [{"text": prompt}]
+        generation = {"maxOutputTokens": max_out}
+        if model == BUILTIN_PROVIDERS[DEFAULT_PROVIDER]["model"]:
+            # the gateway fills in xhigh for this model when no level is sent
+            generation["thinkingConfig"] = {"thinkingLevel": "high"}
         data = _post_json(
             f"{_gemini_api_root(conf['base_url'])}/v1beta/models/{model}:generateContent",
             {"Authorization": f"Bearer {key}", "x-goog-api-key": key},
-            {"contents": [{"role": "user", "parts": parts}], "generationConfig": {"maxOutputTokens": max_out}},
+            {"contents": [{"role": "user", "parts": parts}], "generationConfig": generation},
             timeout,
         )
         return _extract_gemini_text(data, show_think)

@@ -53,7 +53,7 @@ python3 "<skill_dir>/scripts/vision.py" --list-providers
 # Artistic Genius sk- token created in the Gemini group (default provider)
 AG_GEMINI_KEY=sk-your-gemini-key
 # optional overrides:
-# GEMINI_MODEL=gemini-3.8-flash
+# GEMINI_MODEL=gemini-4-hydrogen-xhigh
 # GEMINI_BASE_URL=https://artistic-genius.vip/v1
 ```
 
@@ -81,9 +81,9 @@ Other errors exit 1; `--check` with missing tools exits 2.
 
 | Provider | API style | Default model | Base URL | Key env |
 |---|---|---|---|---|
-| **`gemini`（默认）** | `gemini` native | `gemini-3.8-flash` | `https://artistic-genius.vip/v1` | `AG_GEMINI_KEY` |
+| **`gemini`（默认）** | `gemini` native | `gemini-4-hydrogen-xhigh` | `https://artistic-genius.vip/v1` | `AG_GEMINI_KEY` |
 
-Use the suffix-free model ID at the Artistic Genius gateway; its upstream routing is managed by the gateway. The old `gemini-3.8-flash-high` gateway alias has been removed. Update any existing `GEMINI_MODEL` or `VISION_MODEL` override to `gemini-3.8-flash`.
+`gemini-3.8-flash` has been retired at the Artistic Genius gateway. Update any existing `GEMINI_MODEL` or `VISION_MODEL` override to `gemini-4-hydrogen-xhigh`. The gateway runs this model at `xhigh` thinking when a request names no level, so the default provider sends `thinkingLevel: high` to keep analysis fast.
 
 - `gemini` → `POST {root}/v1beta/models/{model}:generateContent`; local media `inline_data`, YouTube / URLs `fileData.fileUri` (the gateway drops snake_case `file_data`), PDF `application/pdf`.
 - `openai` → `POST {base}/chat/completions`; `image_url` / `video_url` / `input_audio`.

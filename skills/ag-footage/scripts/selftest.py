@@ -152,7 +152,7 @@ def test_client_request(tmp: Path) -> None:
     for path in (image, video):
         path.write_bytes(b"test")
     with patch.object(client.urllib.request, "build_opener", return_value=Opener()):
-        for model in ("gemini-4-hydrogen-xhigh", "gemini-4-argon"):
+        for model in ("gemini-4-hydrogen-xhigh", "gemini-4-carbon"):
             for files in ([], [str(image)], [str(video)]):
                 c = {"model": model, "base_url": "https://example.invalid/v1", "api_key": "test"}
                 check("call: response", client.call(c, files, "test", 30), "ok")

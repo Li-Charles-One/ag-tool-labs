@@ -1,8 +1,8 @@
 ---
 name: ag-footage
-description: "通过 Artistic Genius 做素材说明书：给一条视频（素材或成片）生成剪辑用的 .footage.md：逐帧精确的镜头表、带说话人和可下刀点的台词表、人物、内容分段、金句、重拍与废片、可能听错的词；口播（一镜到底、单人对镜头讲）可加口播模式，另出停顿、语气词、句内重复起头和按字精确到帧的精剪建议；拉片模式给一条或几条参考片（本地文件或链接）出拉片报告：结构与叙事、节奏数据与剪辑手法、视听语言、包装和可借鉴手法，几条一起拉时另出一份汇总对比；多条素材并行；视频下载模式只下载链接（B 站、抖音、小红书等）；也可只出逐帧精确的镜头表，或只出花字表（成片里每个花字、人名条的原文、入点出点、位置和出场方式）。用户说「给这条素材做说明书」「帮我筛一下这条素材」「这条素材能用哪些、哪句可以下刀」「一共几个镜头、每个镜头第几帧到第几帧」「先把这个片子逐帧过一遍」「这条口播帮我出说明书和精剪建议」「口播里哪些停顿、口误、重复要剪掉」「这片子一共多少花字、每个什么时候出现」「把花字时间扒出来，我要重做花字」「帮我拉一下这几条参考片」「拉片，看看人家怎么剪的」「这几条素材一起跑说明书」「把这几个链接的视频下下来」时使用。需要 Artistic Genius 的 Gemini 标准分组令牌（模型）和 Omni 创作优选分组令牌（语音识别、抖音与小红书链接解析）。不要用于一般的视频总结或点评、单纯语音转文字（用 ag-omni），不要用于实际剪辑、拼时间线、导出或生成视频（口播模式只给精剪建议）。"
+description: "通过 Artistic Genius 做素材说明书：给一条视频（素材或成片）生成剪辑用的 .footage.md：逐帧精确的镜头表、带说话人和可下刀点的台词表、人物、内容分段、金句、重拍与废片、可能听错的词；口播（一镜到底、单人对镜头讲）可加口播模式，另出停顿、语气词、句内重复起头和按字精确到帧的精剪建议；拉片模式给一条或几条参考片（本地文件或链接）出拉片报告：结构与叙事、节奏数据与剪辑手法、视听语言、包装和可借鉴手法，几条一起拉时另出一份汇总对比；多条素材并行；视频下载模式只下载链接（B 站、抖音、小红书等）；也可只出逐帧精确的镜头表，或只出花字表（成片里每个花字、人名条的原文、入点出点、位置和出场方式）。用户说「给这条素材做说明书」「帮我筛一下这条素材」「这条素材能用哪些、哪句可以下刀」「一共几个镜头、每个镜头第几帧到第几帧」「先把这个片子逐帧过一遍」「这条口播帮我出说明书和精剪建议」「口播里哪些停顿、口误、重复要剪掉」「这片子一共多少花字、每个什么时候出现」「把花字时间扒出来，我要重做花字」「帮我拉一下这几条参考片」「拉片，看看人家怎么剪的」「这几条素材一起跑说明书」「把这几个链接的视频下下来」时使用。需要 Artistic Genius 的 Omni 创作优选分组令牌（模型、语音识别、抖音与小红书链接解析共用一把）。不要用于一般的视频总结或点评、单纯语音转文字（用 ag-omni），不要用于实际剪辑、拼时间线、导出或生成视频（口播模式只给精剪建议）。"
 metadata:
-  version: "1.0.1"
+  version: "1.1.0"
 ---
 
 # AG Footage（素材说明书）
@@ -31,17 +31,16 @@ python3 "<skill_dir>/scripts/selftest.py"     # offline check after editing the 
 
 `<skill_dir>` is this skill folder; on Windows use `python`. Needs `ffmpeg` / `ffprobe`; no Python packages. Every API call (models, speech recognition, 抖音 / 小红书 link parsing) goes through [Artistic Genius](https://artistic-genius.vip).
 
-Keys are Artistic Genius `sk-` tokens, and a token only works for the group it was created in (console → 令牌 → 新建令牌). They live in environment variables or `scripts/.env`, never in the package:
+The key is an Artistic Genius `sk-` token, and a token only works for the group it was created in (console → 令牌 → 新建令牌). It lives in an environment variable or `scripts/.env`, never in the package:
 
 | Variable | Group | Pays for |
 |---|---|---|
-| `AG_GEMINI_KEY` | Gemini 标准 | every model request (`gemini-4-hydrogen-xhigh`, native `generateContent`); required |
-| `AG_OMNI_KEY` | Omni 创作优选 | speech recognition (Doubao file ASR 2.0, billed by the audio second, two passes a clip) and 抖音 / 小红书 link parsing (billed per successful call) |
+| `AG_OMNI_KEY` | Omni 创作优选 | every model request (Xiaomi `mimo-v2.6-pro`, billed by the token), speech recognition (Doubao file ASR 2.0, billed by the audio second, two passes a clip) and 抖音 / 小红书 link parsing (billed per successful call); required |
 
-A token from the wrong group gets `No available channel`. Without `AG_OMNI_KEY` the transcript is skipped (status `needs_review`) and 抖音 / 小红书 links fall back to the browser route. Optional: `AG_BASE_URL` (default `https://artistic-genius.vip/v1`), `FOOTAGE_MODEL`. Never ask for a token in chat: the user writes it into `scripts/.env`.
+A token from another group gets `No available channel`. Without `AG_OMNI_KEY` nothing runs except `--download-only` (抖音 / 小红书 links then fall back to the browser route) and `measure.py`. Optional: `AG_BASE_URL` (default `https://artistic-genius.vip/v1`), `FOOTAGE_MODEL`. Never ask for a token in chat: the user writes it into `scripts/.env`.
 
 - Local video, or an `http(s)` link, downloaded first (see Download). The folder next to the clip must be writable; otherwise it fails with `UNSUPPORTED_FORMAT`.
-- Every model request explicitly sends `generationConfig.thinkingConfig.thinkingLevel: "high"`, including image, video and text-only requests; a `-high` model-name suffix is not a substitute. This uses the Gemini 3/4 [thinking-level API](https://ai.google.dev/gemini-api/docs/generate-content/thinking), not the legacy `thinkingBudget` parameter.
+- Every model request goes to the gateway's OpenAI-style `/v1/chat/completions` with `thinking: {"type": "enabled"}` (MiMo has no thinking level), images as `image_url` and the whole-clip proxy as `video_url` (2 fps, with its audio), all inline as base64. Thinking counts against the 32768-token output budget: a storyboard answer that thinks through all of it comes back empty and is asked once more.
 - `--script`: a script or keyword file (names, brands, models). The model uses it to flag likely mishearings.
 - Steps: `measure.py` (cuts frame by frame) → doubtful cuts judged by the model on a storyboard → every shot described from its first / middle / last frames → `asr.py` with speaker labels (words → frame ranges and cut points: pause ≥4 frames is a clean cut, <2 frames at punctuation is run-together) → one whole-clip request (summary, people, segments, highlights, retakes, unusable shots, suspect words) → validate.
 - A model request that fails or comes back short is asked once more by the script. One that fails twice leaves a hole instead of failing the clip: the brief is still written, the hole is listed in 待确认 and the status is `needs_review`. Only when the model returned nothing at all does the clip fail.
@@ -54,7 +53,7 @@ Use `--talking-head` when the clip is one person talking to camera in one take (
 
 - Measured hard cuts stay; weak suspects are not sent to the model (hand-held shake, gestures and turning read as cuts there) and are marked `skipped`, not review items.
 - Section 9 of the brief, from word times only: dead air, fillers at a line start or after punctuation, restarts inside a line. Hints, not cuts.
-- The whole-clip request returns segments over lines, visual events tied to lines, and `keep[]`: line ID + `from` / `to` words copied verbatim from that line, in playback order. The script turns them into frames and writes section 8 精剪建议 (its padding and merging rule is printed there) plus `keep` / `edit` in the JSON. A `from` / `to` that does not match the line goes to `待确认` and `review.unmatched_keep`.
+- The whole-clip request returns segments over lines, visual events tied to lines, and `keep[]`: line ID + `from` / `to` words copied verbatim from that line, in playback order. The script turns them into frames and writes section 8 精剪建议 (its padding and merging rule is printed there) plus `keep` / `edit` in the JSON. Quotes a little off still match (within a quarter of their characters, ≥4 characters), a `to` may close one of the next 3 lines, and `None` / `null` mean line start / end; a `from` / `to` that still does not match goes to `待确认` and `review.unmatched_keep`.
 - The brief stays a brief: assembling or exporting the edit is a separate step for the editor or an editing tool.
 - In the default mode, a clip that looks like 口播 gets a warning suggesting `--talking-head`; the mode never switches by itself.
 
@@ -112,7 +111,7 @@ Failures print `Error [CODE]: …` with a non-zero exit: `INPUT_NOT_FOUND` 3, `U
 - `scripts/measure.py`: frame-by-frame cut measurement; the shot list on its own.
 - `scripts/overlays.py`: the overlay sheet (花字表), end to end, and its agent check (`--look`, `--fix`).
 - `scripts/asr.py`: Doubao file ASR with word times and speaker labels, through the gateway's `doubao-asr` routes.
-- `scripts/client.py`: model requests (through Artistic Genius), the retry loop, storyboard questions asked side by side with one re-ask, the per-file cache and the compressed whole-clip proxy.
+- `scripts/client.py`: model requests (Xiaomi MiMo through Artistic Genius), the retry loop, storyboard questions asked side by side with one re-ask, the per-file cache and the compressed whole-clip proxy.
 - `scripts/storyboard.py`: exact-frame storyboard sheets with drawn-in labels.
 - `scripts/download.py`: links → local mp4 (the gateway's `redfox` route, yt-dlp, ego browser).
 - `scripts/selftest.py`: offline self-test on a built clip.

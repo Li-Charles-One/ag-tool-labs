@@ -44,7 +44,7 @@ curl -s https://artistic-genius.vip/v1/messages \
   -H "x-api-key: $AG_API_KEY" \
   -H "anthropic-version: 2023-06-01" \
   -H "Content-Type: application/json" \
-  -d '{"model":"claude-sonnet-5-5","max_tokens":1024,"messages":[{"role":"user","content":"hi"}]}'
+  -d '{"model":"claude-opus-5-5","max_tokens":1024,"messages":[{"role":"user","content":"hi"}]}'
 ```
 
 ## 二、查单把 key（sk- 令牌）

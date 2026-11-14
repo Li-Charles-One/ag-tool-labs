@@ -25,10 +25,9 @@ python3 "<skill_dir>/scripts/vision.py" screenshot.png ui-review
 python3 "<skill_dir>/scripts/vision.py" document.jpg ocr --output json
 python3 "<skill_dir>/scripts/vision.py" before.png compare --compare-with after.png
 
-# Video / YouTube (local ≥15 min is segmented automatically)
+# Video (local ≥15 min is segmented automatically)
 python3 "<skill_dir>/scripts/vision.py" meeting.mp4 video-summary
 python3 "<skill_dir>/scripts/vision.py" lecture-2h.mp4 video-summary --no-long-video
-python3 "<skill_dir>/scripts/vision.py" "https://www.youtube.com/watch?v=..." video-summary --provider gemini   # YouTube: Gemini only
 
 # Audio
 python3 "<skill_dir>/scripts/vision.py" interview.wav audio-transcribe
@@ -36,7 +35,6 @@ python3 "<skill_dir>/scripts/vision.py" clip.mp3 describe          # → audio-s
 
 # PDF
 python3 "<skill_dir>/scripts/vision.py" report.pdf ocr
-VISION_PDF_PAGES=1 python3 "<skill_dir>/scripts/vision.py" scan.pdf ocr --provider gemini   # Gemini reads whole PDFs; this forces pages
 
 # Oversize media: only build the analysis proxy (no API call)
 python3 "<skill_dir>/scripts/vision.py" big.mp4 --proxy-only
@@ -52,11 +50,8 @@ python3 "<skill_dir>/scripts/vision.py" --list-providers
 ```bash
 # Artistic Genius sk- token created in the Omni 创作优选 group (default provider mimo)
 AG_OMNI_KEY=sk-your-omni-key
-# optional: a Gemini-group token, only for --provider gemini (YouTube links)
-# AG_GEMINI_KEY=sk-your-gemini-key
-# optional overrides:
+# optional override:
 # MIMO_MODEL=mimo-v2.6-pro
-# GEMINI_MODEL=gemini-4-hydrogen-xhigh
 ```
 
 Create tokens at <https://artistic-genius.vip> → 控制台 → 令牌 → 新建令牌, and pick the group when creating. A token only reaches the models of its own group.
@@ -84,11 +79,8 @@ Other errors exit 1; `--check` with missing tools exits 2.
 | Provider | API style | Default model | Base URL | Key env |
 |---|---|---|---|---|
 | **`mimo`（默认）** | `openai` | `mimo-v2.6-pro` | `https://artistic-genius.vip/v1` | `AG_OMNI_KEY` |
-| `gemini` | `gemini` native | `gemini-4-hydrogen-xhigh` | `https://artistic-genius.vip/v1` | `AG_GEMINI_KEY` |
 
-`mimo` (Xiaomi MiMo, Omni 创作优选 group) takes images, video with its audio track (2 frames per second), and audio (`mp3` / `wav` / `flac` / `m4a` / `ogg`), all inline as base64; it thinks before every answer, and the thinking counts against `VISION_MAX_TOKENS`. It does not read YouTube links (the script stops with `UNSUPPORTED_FORMAT`) or whole PDFs (pages are rendered with `pdftoppm` and read one by one). Use `--provider gemini` for YouTube; it needs a Gemini-group token and a Gemini model that Artistic Genius currently serves.
-
-`gemini-3.8-flash` has been retired at the Artistic Genius gateway. Update any existing `GEMINI_MODEL` or `VISION_MODEL` override to `gemini-4-hydrogen-xhigh`. The gateway runs this model at `xhigh` thinking when a request names no level, so the default provider sends `thinkingLevel: high` to keep analysis fast.
+`mimo` (Xiaomi MiMo, Omni 创作优选 group) takes images, video with its audio track (2 frames per second), and audio (`mp3` / `wav` / `flac` / `m4a` / `ogg`), all inline as base64; it thinks before every answer, and the thinking counts against `VISION_MAX_TOKENS`. It does not read YouTube links (the script stops with `UNSUPPORTED_FORMAT`; download the video first) or whole PDFs (pages are rendered with `pdftoppm` and read one by one).
 
 - `gemini` → `POST {root}/v1beta/models/{model}:generateContent`; local media `inline_data`, YouTube / URLs `fileData.fileUri` (the gateway drops snake_case `file_data`), PDF `application/pdf`.
 - `openai` → `POST {base}/chat/completions`; `image_url` / `video_url` / `input_audio`.
@@ -113,7 +105,7 @@ OPENROUTER_API_STYLE=openai    # gemini | openai (optional; inferred from host/m
 | `{NAME}_MODEL` | yes | model id |
 | `{NAME}_API_STYLE` | no | `gemini` or `openai` |
 
-One-off override without editing `.env`: `--provider <name> --base-url <url> --api-key <key> --model <id>`. Not every OpenAI-compatible gateway handles video/audio; YouTube is only reliable on `gemini` style.
+One-off override without editing `.env`: `--provider <name> --base-url <url> --api-key <key> --model <id>`. Not every OpenAI-compatible gateway handles video/audio.
 
 ### Common env
 
@@ -131,7 +123,7 @@ One-off override without editing `.env`: `--provider <name> --base-url <url> --a
 | Kind | Extensions |
 |---|---|
 | Image | jpg / png / gif / webp / bmp (SVG: convert to PNG first) |
-| Video | mp4 / mov / avi / mkv / webm / flv / wmv / m4v / YouTube |
+| Video | mp4 / mov / avi / mkv / webm / flv / wmv / m4v |
 | Audio | mp3 / wav / flac / m4a / ogg / aac / wma / opus / aiff (OpenAI-style providers: aiff is converted to AAC first) |
 | PDF | pdf |
 
@@ -172,6 +164,6 @@ Cache files live under system TEMP (`ag-omni-proxy/`, `ag-omni-index/`). Old fil
 - [ ] Image: `python3 scripts/vision.py test.png describe`
 - [ ] Video: `python3 scripts/vision.py test.mp4 video-summary`
 - [ ] Audio: `python3 scripts/vision.py test.wav audio-transcribe`
-- [ ] PDF: `python3 scripts/vision.py test.pdf ocr` (pages on `mimo`; whole document on `--provider gemini`)
+- [ ] PDF: `python3 scripts/vision.py test.pdf ocr` (page by page)
 - [ ] Proxies: `--proxy-only` on a large video / wav / png (expect `h264_*`/`hevc_*`/`libx264`, `.m4a`, `.jpg`)
 - [ ] Errors: a missing file exits 3 with `INPUT_NOT_FOUND`

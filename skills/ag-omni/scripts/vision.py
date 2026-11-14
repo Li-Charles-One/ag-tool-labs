@@ -4,7 +4,6 @@ AG Omni (视听) — Image / video / audio / PDF analysis through Artistic Geniu
 
 Built-in providers:
   mimo    (default) — Xiaomi MiMo (mimo-v2.6-pro) OpenAI-compatible chat.completions via Artistic Genius
-  gemini            — Gemini native generateContent via Artistic Genius (YouTube links)
 
 Custom providers: set {NAME}_BASE_URL / {NAME}_API_KEY / {NAME}_MODEL
   and optional {NAME}_API_STYLE=gemini|openai
@@ -12,8 +11,7 @@ Custom providers: set {NAME}_BASE_URL / {NAME}_API_KEY / {NAME}_MODEL
 Usage:
     python3 vision.py --list-providers
     python3 vision.py --check
-    python3 vision.py <file_or_url> <mode> [--provider mimo|gemini|custom]
-    python3 vision.py https://www.youtube.com/watch?v=... video-summary --provider gemini
+    python3 vision.py <file_or_url> <mode> [--provider mimo|custom]
     python3 vision.py report.pdf ocr
     python3 vision.py long.mp4 video-summary   # auto segment when long
 
@@ -734,13 +732,6 @@ BUILTIN_PROVIDERS = {
         "key_envs": ("AG_OMNI_KEY", "VISION_API_KEY"),
         "note": "Artistic Genius, Omni 创作优选 group (Xiaomi MiMo, OpenAI-compatible)",
     },
-    "gemini": {
-        "base_url": "https://artistic-genius.vip/v1",
-        "model": "gemini-4-hydrogen-xhigh",
-        "api_style": "gemini",
-        "key_envs": ("AG_GEMINI_KEY", "VISION_API_KEY"),
-        "note": "Artistic Genius, Gemini group (native generateContent)",
-    },
 }
 DEFAULT_PROVIDER = "mimo"
 
@@ -1019,9 +1010,6 @@ def call_model(conf: dict, media: list, prompt: str, timeout: float, show_think:
     if conf["api_style"] == "gemini":
         parts = [_gemini_part(src, kind) for src, kind in media] + [{"text": prompt}]
         generation = {"maxOutputTokens": max_out}
-        if model == BUILTIN_PROVIDERS["gemini"]["model"]:
-            # the gateway fills in xhigh for this model when no level is sent
-            generation["thinkingConfig"] = {"thinkingLevel": "high"}
         data = _post_json(
             f"{_gemini_api_root(conf['base_url'])}/v1beta/models/{model}:generateContent",
             {"Authorization": f"Bearer {key}", "x-goog-api-key": key},
@@ -1234,7 +1222,7 @@ def analyze_media(
             raise OmniError("INPUT_NOT_FOUND", f"File not found: {path}")
 
     if is_youtube_url(media_input) and conf["api_style"] != "gemini":
-        raise OmniError("UNSUPPORTED_FORMAT", "YouTube links need a Gemini-style provider (--provider gemini).")
+        raise OmniError("UNSUPPORTED_FORMAT", "YouTube links are not supported: MiMo cannot fetch them. Download the video and pass the local file.")
     is_local = not media_input.startswith(("http://", "https://"))
     kind = media_kind(media_input)
     # URL without clear extension: infer from mode (skip YouTube — always video)
@@ -1386,7 +1374,7 @@ def main():
     parser = argparse.ArgumentParser(
         description=(
             "AG Omni (视听) — multimodal analysis. "
-            "Built-in providers: mimo (default), gemini. "
+            "Built-in provider: mimo (default). "
             "Custom: set {NAME}_BASE_URL / _API_KEY / _MODEL."
         )
     )
@@ -1398,7 +1386,7 @@ def main():
         "--output", "-o", choices=["text", "json"], default="text", help="Output format (default: text)",
     )
     parser.add_argument(
-        "--provider", "-p", default=None, help="Provider id: mimo|gemini or custom name (default: mimo)",
+        "--provider", "-p", default=None, help="Provider id: mimo or custom name (default: mimo)",
     )
     parser.add_argument("--model", "-m", default=None, help="Model override")
     parser.add_argument("--base-url", default=None, help="API base URL override")

@@ -11,7 +11,7 @@ winget install Gyan.FFmpeg        # PDF page mode: install poppler and put pdfto
 sudo apt install ffmpeg poppler-utils
 ```
 
-Verify with `python3 scripts/vision.py --check`. `pdftoppm` (poppler) is only needed for page-mode PDF or OpenAI-style custom providers. The script uses only the Python standard library (3.9+).
+Verify with `python3 scripts/vision.py --check`. `pdftoppm` (poppler) is needed for PDF on the default `mimo` provider (and any OpenAI-style provider), which reads PDFs page by page. The script uses only the Python standard library (3.9+).
 
 ## Usage
 
@@ -28,7 +28,7 @@ python3 "<skill_dir>/scripts/vision.py" before.png compare --compare-with after.
 # Video / YouTube (local ≥15 min is segmented automatically)
 python3 "<skill_dir>/scripts/vision.py" meeting.mp4 video-summary
 python3 "<skill_dir>/scripts/vision.py" lecture-2h.mp4 video-summary --no-long-video
-python3 "<skill_dir>/scripts/vision.py" "https://www.youtube.com/watch?v=..." video-summary
+python3 "<skill_dir>/scripts/vision.py" "https://www.youtube.com/watch?v=..." video-summary --provider gemini   # YouTube: Gemini only
 
 # Audio
 python3 "<skill_dir>/scripts/vision.py" interview.wav audio-transcribe
@@ -36,7 +36,7 @@ python3 "<skill_dir>/scripts/vision.py" clip.mp3 describe          # → audio-s
 
 # PDF
 python3 "<skill_dir>/scripts/vision.py" report.pdf ocr
-VISION_PDF_PAGES=1 python3 "<skill_dir>/scripts/vision.py" scan.pdf ocr   # force page-by-page
+VISION_PDF_PAGES=1 python3 "<skill_dir>/scripts/vision.py" scan.pdf ocr --provider gemini   # Gemini reads whole PDFs; this forces pages
 
 # Oversize media: only build the analysis proxy (no API call)
 python3 "<skill_dir>/scripts/vision.py" big.mp4 --proxy-only
@@ -50,11 +50,13 @@ python3 "<skill_dir>/scripts/vision.py" --list-providers
 ## Setup (`scripts/.env`)
 
 ```bash
-# Artistic Genius sk- token created in the Gemini group (default provider)
-AG_GEMINI_KEY=sk-your-gemini-key
+# Artistic Genius sk- token created in the Omni 创作优选 group (default provider mimo)
+AG_OMNI_KEY=sk-your-omni-key
+# optional: a Gemini-group token, only for --provider gemini (YouTube links)
+# AG_GEMINI_KEY=sk-your-gemini-key
 # optional overrides:
+# MIMO_MODEL=mimo-v2.6-pro
 # GEMINI_MODEL=gemini-4-hydrogen-xhigh
-# GEMINI_BASE_URL=https://artistic-genius.vip/v1
 ```
 
 Create tokens at <https://artistic-genius.vip> → 控制台 → 令牌 → 新建令牌, and pick the group when creating. A token only reaches the models of its own group.
@@ -81,7 +83,10 @@ Other errors exit 1; `--check` with missing tools exits 2.
 
 | Provider | API style | Default model | Base URL | Key env |
 |---|---|---|---|---|
-| **`gemini`（默认）** | `gemini` native | `gemini-4-hydrogen-xhigh` | `https://artistic-genius.vip/v1` | `AG_GEMINI_KEY` |
+| **`mimo`（默认）** | `openai` | `mimo-v2.6-pro` | `https://artistic-genius.vip/v1` | `AG_OMNI_KEY` |
+| `gemini` | `gemini` native | `gemini-4-hydrogen-xhigh` | `https://artistic-genius.vip/v1` | `AG_GEMINI_KEY` |
+
+`mimo` (Xiaomi MiMo, Omni 创作优选 group) takes images, video with its audio track (2 frames per second), and audio (`mp3` / `wav` / `flac` / `m4a` / `ogg`), all inline as base64; it thinks before every answer, and the thinking counts against `VISION_MAX_TOKENS`. It does not read YouTube links (the script stops with `UNSUPPORTED_FORMAT`) or whole PDFs (pages are rendered with `pdftoppm` and read one by one). Use `--provider gemini` for YouTube; it needs a Gemini-group token and a Gemini model that Artistic Genius currently serves.
 
 `gemini-3.8-flash` has been retired at the Artistic Genius gateway. Update any existing `GEMINI_MODEL` or `VISION_MODEL` override to `gemini-4-hydrogen-xhigh`. The gateway runs this model at `xhigh` thinking when a request names no level, so the default provider sends `thinkingLevel: high` to keep analysis fast.
 
@@ -114,7 +119,7 @@ One-off override without editing `.env`: `--provider <name> --base-url <url> --a
 
 | Env | Default | Meaning |
 |---|---|---|
-| `VISION_PROVIDER` | `gemini` | active provider |
+| `VISION_PROVIDER` | `mimo` | active provider |
 | `VISION_MODEL` / `VISION_BASE_URL` / `VISION_API_STYLE` | — | override the **active** provider only |
 | `VISION_MAX_TOKENS` | `32768` | output limit |
 | `VISION_SHOW_THINKING` | off | `1` prints thinking before the answer |
@@ -167,6 +172,6 @@ Cache files live under system TEMP (`ag-omni-proxy/`, `ag-omni-index/`). Old fil
 - [ ] Image: `python3 scripts/vision.py test.png describe`
 - [ ] Video: `python3 scripts/vision.py test.mp4 video-summary`
 - [ ] Audio: `python3 scripts/vision.py test.wav audio-transcribe`
-- [ ] PDF: `python3 scripts/vision.py test.pdf ocr` (whole document) and `VISION_PDF_PAGES=1 …` (pages)
+- [ ] PDF: `python3 scripts/vision.py test.pdf ocr` (pages on `mimo`; whole document on `--provider gemini`)
 - [ ] Proxies: `--proxy-only` on a large video / wav / png (expect `h264_*`/`hevc_*`/`libx264`, `.m4a`, `.jpg`)
 - [ ] Errors: a missing file exits 3 with `INPUT_NOT_FOUND`

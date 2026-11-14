@@ -11,7 +11,7 @@
 | 名称 | 用途 | 需要的凭证 | 下载 |
 |---|---|---|---|
 | [artistic-genius-user-api](skills/artistic-genius-user-api/) | 费用与余额查询：让你的 Agent 用你自己的令牌查余额、已用额度和调用记录，统计某个任务花了多少，金额一律换算成人民币。 | `sk-` 令牌（环境变量 `AG_API_KEY`）；查整个账号的花费还需要访问令牌（`AG_ACCESS_TOKEN`） | [v1.1.1](https://github.com/Li-Charles-One/ag-tool-labs/releases/download/artistic-genius-user-api-v1.1.1/artistic-genius-user-api-v1.1.1.zip) |
-| [ag-omni](skills/ag-omni/) | 视听分析：让你的 Agent 看图、读 PDF、听音频、看视频，做图片理解与 OCR、UI 截图点评、音视频总结与转写，支持 YouTube 链接。 | Gemini 分组的 `sk-` 令牌（环境变量 `AG_GEMINI_KEY`）。本机需要 Python 3.9+ 与 ffmpeg | [v1.1.1](https://github.com/Li-Charles-One/ag-tool-labs/releases/download/ag-omni-v1.1.1/ag-omni-v1.1.1.zip) |
+| [ag-omni](skills/ag-omni/) | 视听分析：让你的 Agent 看图、读 PDF、听音频、看视频，做图片理解与 OCR、UI 截图点评、音视频总结与转写。 | Omni 创作优选分组的 `sk-` 令牌（环境变量 `AG_OMNI_KEY`）。本机需要 Python 3.9+ 与 ffmpeg，读 PDF 另需 poppler（`pdftoppm`） | [v1.2.0](https://github.com/Li-Charles-One/ag-tool-labs/releases/download/ag-omni-v1.2.0/ag-omni-v1.2.0.zip) |
 | [ag-x-search](skills/ag-x-search/) | X 实时搜索：让你的 Agent 通过 Grok 搜 X（Twitter），按关键词找帖子、看某个账号的最近动态、出话题热度与情绪简报，结果带原帖链接。 | Grok 分组的 `sk-` 令牌（环境变量 `AG_GROK_KEY`）。本机需要 Python 3.9+ | [v1.0.3](https://github.com/Li-Charles-One/ag-tool-labs/releases/download/ag-x-search-v1.0.3/ag-x-search-v1.0.3.zip) |
 | [ag-footage](skills/ag-footage/) | 素材说明书：给一条视频生成剪辑用的 `.footage.md`，含逐帧精确的镜头表、带说话人和可下刀点的台词表、人物、分段与金句；口播可出精剪建议，参考片可出拉片报告，成片可出花字表；支持 B 站、抖音、小红书链接下载。 | Omni 创作优选分组的 `sk-` 令牌（`AG_OMNI_KEY`），模型、语音识别与抖音、小红书链接解析共用这一把。本机需要 Python 3.9+ 与 ffmpeg，下载链接需要 yt-dlp | [v1.1.0](https://github.com/Li-Charles-One/ag-tool-labs/releases/download/ag-footage-v1.1.0/ag-footage-v1.1.0.zip) |
 
@@ -47,7 +47,7 @@
 
 ## 凭证（Artistic Genius 专属 skill）
 
-- `sk-` 令牌：登录 <https://artistic-genius.vip> → 控制台 →「API 密钥」→ 新建。建令牌时要选分组，一把令牌只能调用所属分组的模型：`ag-omni` 用 Gemini 分组的令牌，`ag-x-search` 用 Grok 分组的令牌，`ag-footage` 用 Omni 创作优选分组的令牌。
+- `sk-` 令牌：登录 <https://artistic-genius.vip> → 控制台 →「API 密钥」→ 新建。建令牌时要选分组，一把令牌只能调用所属分组的模型：`ag-omni` 和 `ag-footage` 用 Omni 创作优选分组的令牌，`ag-x-search` 用 Grok 分组的令牌。
 - 访问令牌（仅 `artistic-genius-user-api` 查整个账号时需要，`nap_` 开头）：控制台 →「安全」→「访问令牌」→「创建访问令牌」，权限默认全选，先点「清空」，再只勾「个人资料 · 查看」和「用量 · 查看」，建议设有效期。2026-11-07 之前生成的旧访问令牌只在过渡期内可用（约到 2026-12-06），请尽早换新。
 
 凭证只放在环境变量里，不要贴进聊天，也不要写进会提交到 Git 的文件。
